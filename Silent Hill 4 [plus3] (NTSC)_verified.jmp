@@ -1,0 +1,16 @@
+#Jay's Magic Patcher (www.jayxbox.com)
+system=Xbox
+game-title=Silent Hill 4: The Room
+region=NTSC
+version=4B4E001F (KN-031)
+author=by k_away / Evox-T
+notes=Converted from ETM 'Silent Hill 4 +3 (NTSC)' (source: Silent Hill 4 [plus3] (NTSC).etm). Static XBE byte patches. Offsets mapped exactly via XBE section table; TimeDate guard verified.
+
+#[-] Inf Life
+9FC:0BF67408F30F1186E84FCB00686FCB1200C3
+#[-] Inf Life
+11CB67:68FC090100C39090
+#[-] Inf Ammo
+E89EE:90
+#[-] Saves Never Increase
+15B63A:90

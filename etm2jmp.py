@@ -500,6 +500,9 @@ def find_cave(mapper, need, near_va=0, avoid=()):
     A cave in a non-executable section would be loaded as data and never run,
     so EXECUTABLE is mandatory, not a preference.
     Returns (cave_va, section_name, flags) or None."""
+    hc = mapper.header_cave(need)
+    if hc is not None and not any(hc < b + e and b < hc + need for b, e in avoid):
+        return (hc, "XBE header padding", 0)
     best = None
     for name, va, vsz, raw, rawsz, flags in mapper.sections:
         if not (flags & XBE_SEC_EXECUTABLE):
@@ -541,6 +544,7 @@ class XbeMapper:
         if self.data[:4] != b"XBEH":
             raise ValueError(f"{path}: not an XBE (magic {self.data[:4]!r}, expected b'XBEH')")
         self.base = struct.unpack_from("<I", self.data, 0x104)[0]
+        self.size_of_headers = struct.unpack_from("<I", self.data, 0x108)[0]
         self.timedate = struct.unpack_from("<I", self.data, 0x114)[0]
         nsec = struct.unpack_from("<I", self.data, 0x11C)[0]
         sec_va = struct.unpack_from("<I", self.data, 0x120)[0]
@@ -571,6 +575,33 @@ class XbeMapper:
                     return raw + delta, name
                 raise ValueError(f"VA 0x{va:X} in {name} BSS (no file backing)")
         raise ValueError(f"VA 0x{va:X} not in any section")
+
+    def va_to_off_any(self, va):
+        """VA -> file offset, also covering the header page (image base maps
+        file offset 0 up to the first section's raw data)."""
+        try:
+            return self.va_to_off(va)
+        except ValueError:
+            off = va - self.base
+            first_raw = min([raw for _n, _va, _vsz, raw, _rawsz, _f in self.sections],
+                            default=len(self.data))
+            if 0 <= off < first_raw and off < len(self.data):
+                return off, "XBE header padding"
+            raise
+
+    def header_cave(self, need):
+        """Padding between the end of the declared XBE headers (SizeOfHeaders)
+        and the first section's raw data. It is part of the loaded image (the
+        image base maps file offset 0), belongs to no section, and lies beyond
+        SizeOfHeaders, so it is provably unused by the game. Xbox has no NX, so
+        code placed there executes. Returns a VA or None."""
+        start = self.size_of_headers
+        end = min([raw for _n, _va, _vsz, raw, _rawsz, _f in self.sections],
+                  default=len(self.data))
+        end = min(end, len(self.data))
+        if end - start < need or any(b != 0 for b in self.data[start:start + need]):
+            return None
+        return self.base + start
 
     def report(self):
         out = [f"XBE base=0x{self.base:08X} timedate=0x{self.timedate:08X} "
@@ -783,12 +814,12 @@ def main():
                 continue
             cave_va, sec, flags = found
             s_off, s_sec = mapper.va_to_off(h["site"])
-            c_off, _ = mapper.va_to_off(cave_va)
+            c_off, _ = mapper.va_to_off_any(cave_va)
             guard = next((e for va, e in ex.byte_guards if va == h["site"]), None)
             gtxt = "" if guard is None or mapper.data[s_off] == guard \
                  else f"  !! site byte is 0x{mapper.data[s_off]:02X}, trainer expected 0x{guard:02X}"
             tramp = b"\x68" + struct.pack("<I", cave_va) + b"\xC3" + b"\x90" * (ln - 6)
-            runs_by_option[h["option"]].append((c_off, bytes(blob), f"handler in {sec} padding"))
+            runs_by_option[h["option"]].append((c_off, bytes(blob), f"handler in {sec}"))
             runs_by_option[h["option"]].append((s_off, tramp, f"push 0x{cave_va:X}; ret"))
             va_report[h["option"]].append((cave_va, bytes(blob)))
             va_report[h["option"]].append((h["site"], tramp))
@@ -797,7 +828,7 @@ def main():
             approx_notes.append(f"Option {h['option'] + 1}: handler ({len(blob)} bytes) placed at "
                                 f"VA 0x{cave_va:X} in {sec} padding; site trampoline points there")
             print(f"  HOOK at 0x{h['site']:X} -> handler {len(blob)} bytes to VA 0x{cave_va:X} "
-                  f"[{sec} padding]; site := {tramp.hex().upper()}{gtxt}")
+                  f"[{sec}]; site := {tramp.hex().upper()}{gtxt}")
 
     total = 0
     for opt_idx, runs in runs_by_option.items():

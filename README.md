@@ -110,12 +110,17 @@ ETM Maker 的傻瓜模板只发 `stosb`；老作者手写汇编，v3 已支持�
      改写位移等于**静默空操作** → 拒绝并提示改用 `--hook-cave`；
 5. `--hook-cave`（通用兜底，需 `--xbe`）：handler 本身**完全可重定位**
    （`je` 是 rel8，`push <游戏VA>` 是绝对游戏地址，只有跳板立即数依赖 ETM），
-   所以把 handler 原样放进 XBE 段尾**已验证的零填充区**，站点写
+   所以把 handler 原样放进 XBE 内**已验证的零填充区**，站点写
    `68 <caveVA> C3 90…` 指过去即可，与 ETM 驻留版行为完全一致。
-   **只在 EXECUTABLE 段里找填充**——XBE 段标志（已核对 Cxbx-Reloaded
-   `src/common/xbe/Xbe.h`）：`0x1` WRITEABLE、`0x2` PRELOAD、`0x4` **EXECUTABLE**、
-   `0x8` INSERTFILE、`0x10/0x20` 页只读。把 handler 塞进不可执行段会被当数据
-   加载、永远不运行，所以这是硬性条件而非偏好；找不到就直接拒绝。
+   填充区按优先级：
+   - **XBE header padding（首选，SH4 实测用这个）**：`sizeOfHeaders` 到首个
+     4KB 页尾（文件 `0x9FC–0x1000` 这类）——在加载镜像内（image base 映射
+     文件偏移 0）、不属于任何段、在段表之后，且原文件里实测全零。Xbox 的
+     Pentium III 没有 NX 位，header page 可执行，这是经典 header-cave 手法。
+   - **EXECUTABLE 段尾零填充（回退）**：XBE 段标志（已核对 Cxbx-Reloaded
+     `src/common/xbe/Xbe.h`）：`0x1` WRITEABLE、`0x2` PRELOAD、`0x4` **EXECUTABLE**、
+     `0x8` INSERTFILE、`0x10/0x20` 页只读。把 handler 塞进不可执行段会被当数据
+     加载、永远不运行，所以这是硬性条件；两处都找不到就直接拒绝。
 
 
 
@@ -135,6 +140,9 @@ python3 etm2jmp.py file.etm --hook-approx [--xbe default.xbe] --jmp OUT.jmp
 python3 etm2jmp.py file.etm --hook-cave --xbe default.xbe --jmp OUT.jmp
 
 python3 validate_jmp.py OUT.jmp     # 按 jayxbox apply 工具逻辑回验格式
+python3 apply_and_check.py OUT.jmp default.xbe
+                                    # 把记录应用到 XBE 副本并反汇编每个站点
+                                    # （跳板→handler→返回链肉眼可查，不动原文件）
 ```
 
 ### 拿到 default.xbe 之后（完整流程）
@@ -143,6 +151,20 @@ python3 validate_jmp.py OUT.jmp     # 按 jayxbox apply 工具逻辑回验格式
 
 ```bash
 extract-xiso -x game.xiso          # 解出 default.xbe（7z x game.xiso 也行）
+```
+
+两个工具都没装时的零依赖办法（SH4 实测路径）——XISO 里直接按 `XBEH` 魔数
+定位、按头部 `+0x10C` 的 `SizeOfImage` 截取：
+
+```bash
+python3 - <<'PY'
+import mmap, struct
+mm = mmap.mmap(open("Silent.Hill.4.[USA].iso","rb").fileno(), 0)
+i = mm.find(b"XBEH")                                   # 第一个 XBEH = default.xbe
+sz = struct.unpack_from("<I", mm, i + 0x10C)[0]        # SizeOfImage
+open("default.xbe","wb").write(mm[i:i+sz])
+print(f"extracted {sz} bytes from ISO offset 0x{i:X}")
+PY
 ```
 
 **先分清你要传多大的文件**——这是最容易踩的坑：
@@ -241,7 +263,8 @@ python3 make_test_xbe.py     # 生成 6 个合成 XBE
 | 2 | Inf Ammo | `0x000F89EE` | `0x49` | `90`（NOP） | `E89EE` |
 | 3 | Saves Never Increase | `0x0016B63A` | `0x40` | `90`（NOP） | `15B63A` |
 
-选项 1 的跳板把站点 8 字节改成 `68 <ebp+0x2E> C3 90 90`，handler：
+选项 1 的跳板（ETM 安装器实测只写 6 字节 `68 <ebp+0x2E> C3`，留 2 字节死代码；
+静态版补齐为 `68 <caveVA> C3 90 90`），handler：
 
 ```asm
 002E: 0B F6                    or  esi, esi
@@ -251,46 +274,50 @@ python3 make_test_xbe.py     # 生成 6 个合成 XBE
 003F: C3                       ret
 ```
 
-handler 用 `movss` **重放**了被覆盖的原指令，只是把存储目标改到
-`[esi+0xCB4FE8]`——即把血量写操作改道到一个无用槽位。站点守卫字节 `0xF3`
-加上"覆盖 8 字节"正好等于 `F3 0F 11 86 disp32`（`movss [esi+disp32],xmm0`）
-的长度，两者吻合。因此**静态等价形式**是原地改写那 4 字节位移：
+handler 用 `movss` **忠实重放**了被覆盖的原指令（真 XBE 已证实站点原 8 字节
+就是 `F3 0F 11 86 E84FCB00`，位移相同），机制在 `or esi,esi / je`：`esi == 0`
+（主角全局路径）时**跳过**血量写。站点守卫字节 `0xF3` 加上"覆盖 8 字节"正好
+等于 `F3 0F 11 86 disp32` 的长度，两者吻合。~~早期推测的"改写 4 字节位移把
+写操作改道到无用槽位"已被真 XBE 证伪~~（改写位移 = 空操作），正确静态化只有
+`--hook-cave`，见下。
 
-```
-11CB6B:E84FCB00      ; VA 0x0012CB6B = 站点+4
-```
+产物（已用真 XBE 验证，见下）：
 
-两个产物：
+| 文件 | 内容 | 状态 |
+|---|---|---|
+| `Silent Hill 4 [plus3] (NTSC)_verified.jmp` | 全部 3 项（选项 1 走 header-padding cave） | ✅ 端到端验证 |
+| `Silent Hill 4 [plus3] (NTSC).jmp` | 仅选项 2、3 | ✅ 有效（安全子集） |
+| ~~`_incl_Inflife.jmp`~~ | 选项 1 的位移改写 | ❌ **已证伪为静默空操作，已删除** |
 
-| 文件 | 内容 |
-|---|---|
-| `Silent Hill 4 [plus3] (NTSC).jmp` | 仅选项 2、3（安全，无假设） |
-| `Silent Hill 4 [plus3] (NTSC)_incl_Inflife.jmp` | 加选项 1 的位移改写等价形式 |
+### ✅ 真 XBE 验证结果（`Silent.Hill.4.[USA].iso` → `default.xbe`）
 
-> ⚠ **选项 1 的等价形式未经真 XBE 验证**（本仓库没有 SH4 的 `default.xbe`）。
-> 存在两种互斥解释，只有读站点那 8 字节才能判定：
->
-> | 站点 `0x0012CB67` 原 8 字节 | handler 的性质 | 正确静态化 |
-> |---|---|---|
-> | `F3 0F 11 86 <D1>`，**D1 ≠ `0xCB4FE8`** | 把血量写操作**改道**到无用槽位 | `--hook-approx` → `11CB6B:E84FCB00` |
-> | `F3 0F 11 86 E84FCB00`（**D1 已等于** handler 位移） | **忠实重放**原指令，改道说不成立 | 只能 `--hook-cave`（改写位移等于空操作） |
-> | 不是 `F3 0F 11 86 …` 形状 | handler 重放的不是这条指令 | 只能 `--hook-cave` |
->
-> 关于 `or esi,esi / je` 的作用，取决于 `esi` 是什么，两种读法**都自洽**：
->
-> - **`esi` = 对象指针** → 它只是防空指针写崩溃的防御，机制是"改道位移"；
-> - **`esi` = 实体索引偏移**（共用代码 / 敌我过滤）→ 游戏自己给 0 号实体（主角）
->   传 `esi = 0`，金手指**无需**清零，此时 `je` 就是**机制本身**：跳过主角的血量
->   写、怪物照常扣血，即"主角无敌但敌人正常掉血"。这种情况下 handler 是对原
->   指令的忠实重放，改写位移等于空操作——正是反证检查要拦的情形。
->
-> 判定权只在站点那 8 个字节手上，别用"内存大小""结构体不可能 13MB"这类
-> 论据替代证据。handler 实际长度 **18 字节**（`0x2E–0x3F`），`je` 是 `74 08`。
+- **GUARD OK**：XBE TimeDate `0x40E173E9` == ETM 守卫（同版本，2004-06-29 编译）。
+- **改道说已死**：站点 `0x0012CB67` 原 8 字节就是 `F3 0F 11 86 E84FCB00`——
+  位移**已等于** handler 位移，`--hook-approx` 正确拒绝（改写位移 = 空操作）。
+- **机制坐实**（真函数反汇编）：该函数是血量 setter，写 `[esi+0xCB4FE8]`。
+  `esi == 0` 时写到 `0x00CB4FE8` = **.data BSS 里的全局主角血量变量**
+  （.data VA `0x20FEA0`+`0xDA993C`，BSS 无文件 backing）；`esi ≠ 0` 是实体
+  相对写。handler 的 `or esi,esi / je` **只跳过主角的血量写**，其余实体照常
+  → 主角血量永不更新、怪物正常掉血。`je` 就是机制本身，不是防御性检查。
+  全 XBE 中 `[esi+0xCB4FE8]` 共 8 处引用，全部集中在 `0x12CAFC–0x12CD54`
+  这组血量 getter/setter 里。
+- **cave 选址（已证明安全）**：`sizeOfHeaders = 0x9FC`，文件 `0x9FC–0x1000`
+  共 1542 字节全零——在加载镜像内（image base 映射文件偏移 0）、不属于任何段、
+  在段表（VA `0x10370` + 12×56 = `0x10610`）之后。handler 放 VA `0x109FC`。
+  Xbox 的 Pentium III 无 NX，header page 可执行，这是经典 header-cave 手法。
+- **端到端回验**（`apply_and_check.py`）：4 条记录应用到 default.xbe 副本 →
+  站点变 `push 0x109FC; ret; nop; nop` → handler 重放 `movss` →
+  `push 0x12CB6F; ret` 精确落回原 `xor eax,eax` 序言尾；Inf Ammo 站点是真
+  `dec ecx`（弹药递减）、Saves 站点是真 `inc eax`（存档计数递增），NOP 语义吻合。
+- **忠实度**：cave 里的 handler 与 ETM+`0x2E` 逐字节相同（含返回地址
+  `0x12CB6F`）。原 ETM 跳板只有 6 字节（`68 imm C3`，留 2 字节死代码），
+  静态版用 `90 90` 补齐 8 字节，行为一致且更干净。
+- ETM 驻留版行为对照（从 ETM 机器码直接反汇编）：入口先 `cmp [0x10114],
+  0x40E173E9` 版本守卫，再 `mov ax,0xF390; cmp [edi],ah` 原字节守卫，然后
+  `lea esi,[ebp+0x2E]` + `call` 安装器写 `68 <handler> C3`——与静态版等价。
 
->
-> 拿到 XBE 后：`python3 etm2jmp.py <etm> --xbe default.xbe --hook-approx`
-> 会自动判定并只在可证明时发记录；不行就换 `--hook-cave`。
-> `make_test_xbe.py` 已把这四种情形做成回归用例（`test_xbe_sh4*.bin`）。
+handler 实际长度 **18 字节**（`0x2E–0x3F`），`je` 是 `74 08`。
+`make_test_xbe.py` 已把这几种情形做成回归用例（`test_xbe_sh4*.bin`）。
 
 
 **易错点**（分析这个文件时容易读错的地方，均已用字节级检索核实）：

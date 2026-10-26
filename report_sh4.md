@@ -38,3 +38,36 @@ The trainer refuses to patch unless the byte already at the site matches:
 ```
 
 The trampoline's 4 immediate bytes are `(ETM load address + offset)`, which only exist while the trainer engine has the ETM mapped in the game process, so they cannot be copied into a static `.JMP` record.
+
+## ✅ VERIFIED against the real XBE (Silent.Hill.4.[USA].iso → default.xbe)
+
+- XBE TimeDate `0x40E173E9` == ETM guard → **same build** (compiled 2004-06-29).
+- Site `0x0012CB67` original bytes: `F3 0F 11 86 E84FCB00` = `movss [esi+0xCB4FE8], xmm0`
+  — displacement **already equals** the handler's displacement → the handler is a
+  faithful replay, the "redirect to a junk slot" theory is dead. `--hook-approx`
+  correctly refuses; `--hook-cave` is the only correct static form.
+- Mechanism (real function disassembly): the function is the health setter.
+  `esi == 0` → the store targets absolute `0x00CB4FE8`, which lies in **.data BSS**
+  (section `.data` VA `0x0020FEA0`+`0xDA993C`, raw `0x200000`+`0x1211D4`) = the
+  global player-health float. `esi ≠ 0` → entity-relative store. The handler's
+  `or esi,esi / je` skips **only the player's health write**; all other entities
+  replay normally. All 8 references to `[esi+0xCB4FE8]` in the whole XBE sit in
+  the getter/setter cluster `0x12CAFC–0x12CD54`.
+- Cave: `sizeOfHeaders = 0x9FC`; file `0x9FC–0x1000` (1542 bytes) is all zero,
+  inside the loaded image (image base maps file offset 0), belongs to no section,
+  and lies past the section-header table (VA `0x10370` + 12×56 = `0x10610`).
+  Handler placed at VA `0x109FC` (18 bytes, verbatim copy of ETM+`0x2E`).
+- End-to-end (`apply_and_check.py`): records applied to a copy of default.xbe;
+  site becomes `push 0x109FC; ret; nop; nop`; handler replays the `movss` behind
+  the esi guard and returns to `0x12CB6F` (`xor eax,eax` epilogue) exactly.
+  Inf Ammo site byte `0x49` = real `dec ecx` (ammo decrement), Saves site byte
+  `0x40` = real `inc eax` (save counter increment) — NOP semantics confirmed.
+- Fidelity: original ETM trampoline is 6 bytes (`68 imm C3`, leaving 2 dead
+  bytes); the static version pads with `90 90` — same behavior, cleaner.
+- ETM resident flow decoded: `cmp [0x10114],0x40E173E9` (version) →
+  `mov edi,0x12CB67; mov ax,0xF390; cmp [edi],ah` (signature) →
+  `lea esi,[ebp+0x2E]` → installer writes `68 <handler> C3` at the site.
+
+**Deliverable: `Silent Hill 4 [plus3] (NTSC)_verified.jmp`** (all 3 options).
+The earlier `_incl_Inflife.jmp` (displacement rewrite) is proven to be a silent
+no-op on this build and was removed.

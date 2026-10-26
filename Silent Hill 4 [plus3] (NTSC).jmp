@@ -1,10 +1,10 @@
 #Jay's Magic Patcher (www.jayxbox.com)
 system=Xbox
-game-title=Silent Hill 4: The Room
+game-title=Silent Hill 4
 region=NTSC
 version=4B4E001F (KN-031)
 author=by k_away / Evox-T
-notes=Converted from ETM 'Silent Hill 4 +3 (NTSC)' (source: Silent Hill 4 [plus3] (NTSC).etm). Static XBE byte patches. Offsets = ETM VA - 0x10000 (heuristic; verify against your XBE with --xbe). Runtime-hook options are NOT included (they need the ETM resident in game memory).
+notes=Converted from ETM 'Silent Hill 4 +3 (NTSC)' (source: Silent Hill 4 [plus3] (NTSC).etm). Static XBE byte patches. Offsets mapped exactly via XBE section table; TimeDate guard verified.
 
 #[-] Inf Ammo
 E89EE:90

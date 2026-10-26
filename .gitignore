@@ -2,3 +2,5 @@ __pycache__/
 *.pyc
 test_xbe_*.bin
 /tmp/
+*.iso
+*.xbe
