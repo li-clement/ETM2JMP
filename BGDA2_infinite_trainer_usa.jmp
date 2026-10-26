@@ -1,0 +1,72 @@
+#Jay's Magic Patcher (www.jayxbox.com)
+system=Xbox
+game-title=Baldur's Gate - Dark Alliance 2
+region=NTSC
+version=4950000A (IP-010)
+author=Made by _HellDasxS_
+notes=Converted from ETM 'Baldurs Gate Dark Alliance 2 +16 NTSC (USA)' (source: Baldurs Gate - Dark Alliance 2.etm). Static XBE byte patches. Offsets = ETM VA - 0x10000 (heuristic; verify against your XBE with --xbe).
+
+#[-] Infinite Blue Potions
+12B579:909090
+#[-] Infinite Red Bottles
+12B7EE:909090
+#[-] Infinite Recalls
+B4499:9090909090909090
+#[-] One kill level 40
+14B0E7:90909090
+#[-] Never gain XP
+14B0EE:909090
+#[-] Buy give you GOLD
+144E2C:01
+#[-] Sell NOT take ITEM
+145142:90909090
+#[-] Infinite Skill Points
+156075:9090
+#[-] Take Skills 0 points
+156051:909090909090
+#[-] Inf Jewels in Workshop
+143F91:909090
+#[-] Inf Jewels in Workshop
+14403C:909090
+#[-] Inf Jewels in Workshop
+143EE6:909090
+#[-] Take money give XP
+D1E7D:A0474900
+#[-] Take money give XP
+D1E8D:A0474900
+#[-] Better Shop
+14655E:E96313000090
+#[-] Better Shop
+1478CE:74E31F00
+#[-] Better Shop
+1478EC:94E31F00
+#[-] Better Shop
+14790A:44E31F00
+#[-] Better Shop
+147928:28E31F00
+#[-] Extreme Mode
+3175FC:11
+#[-] Infinite Health
+25D9FC:01
+#[-] Infinite Health
+2089E0:000000
+#[-] Better Borador
+20EB48:442220
+#[-] Better Borador
+20EB54:C02120
+#[-] Better Borador
+20EB3C:00E31F
+#[-] Better Borador
+20EB30:082720
+#[-] Better Borador
+20EB7C:0A
+#[-] Better Borador
+20EB74:0A
+#[-] Better Borador
+20EB78:65
+#[-] Better Borador
+20EB6C:03
+#[-] 2 PNTS each 4 levels
+1546ED:FF4374FF437490FF8380000000FF838000000090FF8384000000FF838400000090FF4378FF4378FF437CFF437CFF83880000009090
+#[-] 2 PNTS each 4 levels
+1546BD:75
