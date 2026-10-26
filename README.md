@@ -343,6 +343,28 @@ handler 实际长度 **18 字节**（`0x2E–0x3F`），`je` 是 `74 08`。
 - 只用 `偏移:HEX` 原地覆盖记录，不用 `APPEND:`（XPSemu 不支持）。
   "Better Shop" 的 `E9` 跳转目标是游戏已有代码，纯静态写入可复现。
 
+## 本仓库自带 Agent Skill（`skill/etm-to-jmp/`）
+
+整套工作流已沉淀为可复用的 agent skill，随仓库分发：
+
+```
+skill/etm-to-jmp/
+├── SKILL.md      5 步管线（取 XBE → guard first → hook 处理 → read-back 回验 → 部署）+ SH4 实证案例
+├── formats.md    ETM / XBE / .JMP 格式表、段表布局、Title ID 约定（按需加载）
+└── pitfalls.md   实际踩过的全部坑：38 27=cmp[edi],AH、段表步长 56、rb"\x86" 原始字面量、
+                  忠实重放⇒位移改写=空操作 的反证规则……（按需加载）
+```
+
+安装到任意机器的 agent 技能目录（本机为 `~/.agents/skills/`）：
+
+```bash
+cp -r skill/etm-to-jmp ~/.agents/skills/
+```
+
+装好后无需记忆技能名：提到 `.etm`/`.jmp`/xemu 补丁/XBE 补丁点，agent 会自动加载
+这套经过真 XBE 验证的流程。**`skill/` 目录是单一事实源**——改进流程时改这里，
+再同步回本机技能目录。
+
 ## 部署到 XPSemu（PS5）
 
 1. 把 `.jmp` 放入 `/data/xemu/patches/`。
