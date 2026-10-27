@@ -285,7 +285,7 @@ handler 用 `movss` **忠实重放**了被覆盖的原指令（真 XBE 已证实
 
 | 文件 | 内容 | 状态 |
 |---|---|---|
-| `Silent Hill 4 [plus3] (NTSC)_verified.jmp` | 全部 3 项（选项 1 走 header-padding cave） | ✅ 端到端验证 |
+| `Silent Hill 4 [plus3] (NTSC)_verified.jmp` | 全部 3 项（选项 1 走 header-padding cave） | ✅ 端到端验证 + **PS5/XPSemu 实机生效**（2026-10-26） |
 | `Silent Hill 4 [plus3] (NTSC).jmp` | 仅选项 2、3 | ✅ 有效（安全子集） |
 | ~~`_incl_Inflife.jmp`~~ | 选项 1 的位移改写 | ❌ **已证伪为静默空操作，已删除** |
 
@@ -318,6 +318,18 @@ handler 用 `movss` **忠实重放**了被覆盖的原指令（真 XBE 已证实
 
 handler 实际长度 **18 字节**（`0x2E–0x3F`），`je` 是 `74 08`。
 `make_test_xbe.py` 已把这几种情形做成回归用例（`test_xbe_sh4*.bin`）。
+
+### ✅ 实机验证（XPSemu / PS5，2026-10-26）
+
+- 部署 `Silent Hill 4 [plus3] (NTSC)_verified.jmp`（全部 3 项）到 PS5 上的
+  XPSemu，**Inf Life / Inf Ammo / Saves Never Increase 全部生效**。
+- 这补上了静态回验（`apply_and_check.py`）证明不了的最后一环：**header-padding
+  cave（VA `0x109FC`）在真实加载器下确实可执行**——`push 0x109FC; ret` 跳板进
+  handler、`movss` 重放、`push 0x12CB6F; ret` 精确返回，游戏不崩。Xbox
+  Pentium III 无 NX、header page 可执行的经典 header-cave 手法，在 xemu 系
+  加载器上成立。
+- Inf Life 生效且游戏正常运行，行为级印证了 `or esi,esi / je` 守卫只冻结
+  主角血量（若它跳过全部实体的血量写，敌人不会掉血，很容易察觉——未出现）。
 
 
 **易错点**（分析这个文件时容易读错的地方，均已用字节级检索核实）：
@@ -370,6 +382,10 @@ cp -r skill/etm-to-jmp ~/.agents/skills/
 1. 把 `.jmp` 放入 `/data/xemu/patches/`。
 2. 选中游戏 → **△** → Game patches → 勾选需要的作弊项。
 3. 补丁在加载时对内存中的 XBE 原地打入，不修改原盘 XISO。
+
+> **实机验证（2026-10-26）**：`Silent Hill 4 [plus3] (NTSC)_verified.jmp`
+> 全部 3 项按上述步骤在 PS5 XPSemu 上部署后**全部生效**（含 Inf Life 的
+> header-cave handler）。详见上文「实机验证」一节。
 
 若金手指无效或崩溃：大概率是启发式偏移与你 XBE 的段对齐不符（或 XBE 版本
 不对），用 `--xbe` 精确模式重新生成。

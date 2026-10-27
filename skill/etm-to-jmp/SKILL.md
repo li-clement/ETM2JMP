@@ -68,3 +68,8 @@ the global player-health float in `.data` BSS at `0x00CB4FE8`; the handler
 skips exactly that store, entity writes replay untouched. The earlier
 displacement-rewrite theory was falsified by the site bytes themselves —
 delete such artifacts once disproven, don't leave them as traps.
+
+**Hardware confirmation (2026-10-26, XPSemu on PS5):** all 3 options of the
+`--hook-cave` build took effect in-game. This proves the header-padding cave
+is executable under the real loader (trampoline → handler → exact return,
+no crash) — the one thing static read-back cannot establish.

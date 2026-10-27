@@ -68,6 +68,21 @@ The trampoline's 4 immediate bytes are `(ETM load address + offset)`, which only
   `mov edi,0x12CB67; mov ax,0xF390; cmp [edi],ah` (signature) →
   `lea esi,[ebp+0x2E]` → installer writes `68 <handler> C3` at the site.
 
-**Deliverable: `Silent Hill 4 [plus3] (NTSC)_verified.jmp`** (all 3 options).
+## ✅ VERIFIED on hardware (XPSemu on PS5, 2026-10-26)
+
+- Deployed `Silent Hill 4 [plus3] (NTSC)_verified.jmp` (all 3 options) to
+  XPSemu on PS5: `/data/xemu/patches/`, enabled via Game patches.
+- **All three options took effect**, including Inf Life via the header-cave
+  handler at VA `0x109FC` — the cave is executable under the real loader, the
+  `push 0x109FC; ret` → handler → `push 0x12CB6F; ret` chain returns cleanly,
+  and the game runs without crashing.
+- This closes the one gap the static end-to-end check (`apply_and_check.py`)
+  could not cover: loader-level executability of the XBE header padding.
+- Inf Life working while the game plays normally behaviorally confirms the
+  `or esi,esi / je` guard freezes only the player's health (a guard skipping
+  every entity's health write would leave enemies undamageable — not observed).
+
+**Deliverable: `Silent Hill 4 [plus3] (NTSC)_verified.jmp`** (all 3 options;
+static end-to-end verified **and** hardware-verified on XPSemu/PS5).
 The earlier `_incl_Inflife.jmp` (displacement rewrite) is proven to be a silent
 no-op on this build and was removed.
