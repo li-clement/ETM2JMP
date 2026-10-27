@@ -72,4 +72,6 @@ delete such artifacts once disproven, don't leave them as traps.
 **Hardware confirmation (2026-10-26, XPSemu on PS5):** all 3 options of the
 `--hook-cave` build took effect in-game. This proves the header-padding cave
 is executable under the real loader (trampoline → handler → exact return,
-no crash) — the one thing static read-back cannot establish.
+no crash) — the one thing static read-back cannot establish. Follow-up dog
+fight: player takes no damage, dog still killable — both branches of the
+`or esi,esi / je` guard confirmed live.

@@ -78,9 +78,12 @@ The trampoline's 4 immediate bytes are `(ETM load address + offset)`, which only
   and the game runs without crashing.
 - This closes the one gap the static end-to-end check (`apply_and_check.py`)
   could not cover: loader-level executability of the XBE header padding.
-- Inf Life working while the game plays normally behaviorally confirms the
-  `or esi,esi / je` guard freezes only the player's health (a guard skipping
-  every entity's health write would leave enemies undamageable — not observed).
+- Direct behavioral confirmation of both guard branches (follow-up in-game
+  test, dog fight at Henry's apartment): dog bites deal **no damage to the
+  player**, yet the dog **can be killed normally**. `esi == 0` (player global
+  path) store skipped by `je`; `esi ≠ 0` (entity path) `movss` replayed, dog
+  health drains to death. The patch does not freeze enemies or block
+  progression.
 
 **Deliverable: `Silent Hill 4 [plus3] (NTSC)_verified.jmp`** (all 3 options;
 static end-to-end verified **and** hardware-verified on XPSemu/PS5).
