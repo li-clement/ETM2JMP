@@ -1,0 +1,12 @@
+#Jay's Magic Patcher (www.jayxbox.com)
+system=Xbox
+game-title=Silent Hill 4
+region=NTSC
+version=4B4E001F (KN-031)
+author=by k_away / Evox-T
+notes=Converted from ETM 'Silent Hill 4 +3 (NTSC)' (source: Silent Hill 4 [plus3] (NTSC).etm). Static XBE byte patches. Offsets mapped exactly via XBE section table; TimeDate guard verified. Runtime-hook options are NOT included (they need the ETM resident in game memory).
+
+#[-] Inf Ammo
+E89EE:90
+#[-] Saves Never Increase
+15B63A:90

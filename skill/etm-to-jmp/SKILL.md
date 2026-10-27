@@ -12,9 +12,12 @@ the TimeDate guard, and a read-back disassembly before it ships.
 Tools live at the root of the `jmp_patch_converter` repo (this skill ships in
 its `skill/` dir): `etm2jmp.py` (converter), `validate_jmp.py` (format
 re-check), `apply_and_check.py` (apply records to an XBE copy and disassemble
-every patched site), `make_test_xbe.py` (synthetic regression fixtures). If
-that repo isn't checked out where you are, clone it first. Format tables and
-field offsets: [formats.md](formats.md). Every trap already paid for:
+every patched site), `make_test_xbe.py` (synthetic regression fixtures, into
+`tests/`), `convert_all.sh` (regenerates every shipped patch in `output/`
+byte-for-byte). Repo convention: trainers + `default.xbe` go in `input/`,
+converted `.jmp` land in `output/`, `--report` writes analyses to `reports/`.
+If that repo isn't checked out where you are, clone it first. Format tables
+and field offsets: [formats.md](formats.md). Every trap already paid for:
 [pitfalls.md](pitfalls.md).
 
 ## Pipeline
@@ -25,7 +28,8 @@ field offsets: [formats.md](formats.md). Every trap already paid for:
    Guard-only checks need just the first 4KB; hook work needs the full file.
 
 2. **Guard first.**
-   `python3 etm2jmp.py trainer.etm --xbe default.xbe --jmp OUT.jmp`
+   `python3 etm2jmp.py trainer.etm --xbe default.xbe` (the `.jmp` lands in
+   `output/<name>.jmp`; batch `input/*.etm` and `--report` are supported)
    Read the first line: `GUARD OK` (ETM's TimeDate check == this XBE's
    TimeDate) → same build, continue. `GUARD MISMATCH` → **stop**; the ETM's
    addresses belong to another build and every patch would be garbage. Each

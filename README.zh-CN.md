@@ -21,6 +21,21 @@
 > `C6/C7`、`E8`、SSE 等指令（SH4 样本 60 条指令里 40 条被它当成 `db`），
 > **不能**用它提取补丁。
 
+## 项目结构
+
+```
+input/    原始 .etm 金手指 + SH4 验证用的真实 default.xbe（xbe 已 gitignore）
+output/   所有转换好的 .jmp —— 默认所有转换产物都落在这里
+reports/  每个文件的 markdown 分析报告（--report 自动生成）
+tests/    合成 XBE 回归测试夹具（make_test_xbe.py 生成；已 gitignore）
+skill/    etm-to-jmp agent skill（工作流的单一事实源）
+*.py      四个工具：etm2jmp / validate_jmp / apply_and_check / make_test_xbe
+```
+
+要转换的东西放 `input/`，工具产出默认落 `output/`（补丁）和 `reports/`（分析），
+不用带任何参数。`output/` 里每个文件都能逐字节复现——`./convert_all.sh` 从
+`input/` 一键重新生成全部补丁。
+
 
 ## 地址模型（核心）
 
@@ -128,23 +143,32 @@ ETM Maker 的傻瓜模板只发 `stosb`；老作者手写汇编，v3 已支持�
 
 ## 用法
 
+转换器支持**一次传多个** `.etm`；转换好的 `.jmp` 默认落在 `output/<名字>.jmp`
+（`--outdir DIR` 换目录，`--jmp PATH` 显式指定单个输出文件）：
+
 ```bash
 # 推荐：提供目标游戏的 default.xbe（精确换算 + 版本校验）
-python3 etm2jmp.py file.etm --xbe default.xbe --jmp OUT.jmp
+python3 etm2jmp.py input/file.etm --xbe input/default.xbe
+
+# 批量：整个目录的金手指一次转完，每个文件顺带一份报告
+python3 etm2jmp.py input/*.etm --xbe input/default.xbe --report
 
 # 无 XBE 样本：启发式 VA-0x10000（输出带警告）
-python3 etm2jmp.py file.etm [--jmp OUT.jmp] [--report OUT.md] [--disasm]
+python3 etm2jmp.py file.etm [--outdir DIR] [--report [PATH]] [--disasm]
+
+# 显式指定单个输出路径
+python3 etm2jmp.py file.etm --jmp OUT.jmp
 
 # 含运行时 Hook 的 ETM：尝试证明静态等价形式（配合 --xbe 才能验证）
-python3 etm2jmp.py file.etm --hook-approx [--xbe default.xbe] --jmp OUT.jmp
+python3 etm2jmp.py file.etm --hook-approx [--xbe default.xbe]
 
 # 证明不了时的通用兜底：把 handler 搬进 XBE 零填充区（必须 --xbe）
-python3 etm2jmp.py file.etm --hook-cave --xbe default.xbe --jmp OUT.jmp
+python3 etm2jmp.py file.etm --hook-cave --xbe default.xbe
 
-python3 validate_jmp.py OUT.jmp     # 按 jayxbox apply 工具逻辑回验格式
-python3 apply_and_check.py OUT.jmp default.xbe
-                                    # 把记录应用到 XBE 副本并反汇编每个站点
-                                    # （跳板→handler→返回链肉眼可查，不动原文件）
+python3 validate_jmp.py output/OUT.jmp  # 按 jayxbox apply 工具逻辑回验格式
+python3 apply_and_check.py output/OUT.jmp input/default.xbe
+                                        # 把记录应用到 XBE 副本并反汇编每个站点
+                                        # （跳板→handler→返回链肉眼可查，不动原文件）
 ```
 
 ### 拿到 default.xbe 之后（完整流程）
@@ -164,7 +188,7 @@ import mmap, struct
 mm = mmap.mmap(open("Silent.Hill.4.[USA].iso","rb").fileno(), 0)
 i = mm.find(b"XBEH")                                   # 第一个 XBEH = default.xbe
 sz = struct.unpack_from("<I", mm, i + 0x10C)[0]        # SizeOfImage
-open("default.xbe","wb").write(mm[i:i+sz])
+open("input/default.xbe","wb").write(mm[i:i+sz])
 print(f"extracted {sz} bytes from ISO offset 0x{i:X}")
 PY
 ```
@@ -183,7 +207,7 @@ PY
 **第 1 步：先做版本校验**
 
 ```bash
-python3 etm2jmp.py "Silent Hill 4 [plus3] (NTSC).etm" --xbe default.xbe --jmp OUT.jmp
+python3 etm2jmp.py "input/Silent Hill 4 [plus3] (NTSC).etm" --xbe input/default.xbe
 ```
 
 看输出第一行结论：
@@ -197,7 +221,7 @@ python3 etm2jmp.py "Silent Hill 4 [plus3] (NTSC).etm" --xbe default.xbe --jmp OU
 **第 2 步：处理运行时 Hook**（只有含 Hook 的 ETM 需要，比如 SH4 的 Inf Life）
 
 ```bash
-python3 etm2jmp.py <etm> --xbe default.xbe --hook-approx --jmp OUT.jmp
+python3 etm2jmp.py <etm> --xbe input/default.xbe --hook-approx
 ```
 
 三种结果，工具自己判定，不需要你猜：
@@ -211,7 +235,7 @@ python3 etm2jmp.py <etm> --xbe default.xbe --hook-approx --jmp OUT.jmp
 **第 3 步：兜底——把 handler 搬进可执行段填充区**
 
 ```bash
-python3 etm2jmp.py <etm> --xbe default.xbe --hook-cave --jmp OUT.jmp
+python3 etm2jmp.py <etm> --xbe input/default.xbe --hook-cave
 ```
 
 产出两条记录：cave 里的 18 字节 handler + 站点的 `68 <caveVA> C3 90 90`。
@@ -221,13 +245,14 @@ python3 etm2jmp.py <etm> --xbe default.xbe --hook-cave --jmp OUT.jmp
 **第 4 步：回验并部署**
 
 ```bash
-python3 validate_jmp.py OUT.jmp
+python3 validate_jmp.py output/OUT.jmp
+python3 apply_and_check.py output/OUT.jmp input/default.xbe
 ```
 
 **回归测试**（不需要真游戏，合成 XBE）：
 
 ```bash
-python3 make_test_xbe.py     # 生成 6 个合成 XBE
+python3 make_test_xbe.py     # 生成合成 XBE 夹具到 tests/
 ```
 
 覆盖：GUARD OK/MISMATCH、跨段对齐漂移换算、BSS 无文件 backing 时**报告并跳过**
@@ -237,12 +262,15 @@ python3 make_test_xbe.py     # 生成 6 个合成 XBE
 
 ## 本仓库已转换文件
 
+所有转换好的补丁都在 [`output/`](output/)；逐文件分析报告在
+[`reports/`](reports/)。`./convert_all.sh` 可从 `input/` 逐字节重新生成全部补丁。
+
 ### Baldur's Gate - Dark Alliance 2（Title ID `4950000A` → IP-010）
 
 | 文件 | 来源 | 选项 | 记录 |
 |---|---|---|---|
-| `BGDA2_infinite_trainer_usa.jmp` | `Baldurs Gate - Dark Alliance 2.etm`（+16 NTSC USA） | 16 | 32 |
-| `BGDA2_infinite_trainer_ntsc.jmp` | `Baldurs Gate Dark Alliance 2 p16 ntsc.etm`（+16 NTSC） | 16 | 39 |
+| `output/BGDA2_infinite_trainer_usa.jmp` | `input/Baldurs Gate - Dark Alliance 2.etm`（+16 NTSC USA） | 16 | 32 |
+| `output/BGDA2_infinite_trainer_ntsc.jmp` | `input/Baldurs Gate Dark Alliance 2 p16 ntsc.etm`（+16 NTSC） | 16 | 39 |
 
 - 偏移已按 `VA − 0x10000` 修正（例：ETM `0x13B579` → `.jmp` `12B579`）。
 - 两个独立 ETM 的 13 个共有选项记录逐字节一致（同一约定下的交叉验证）。
@@ -251,8 +279,8 @@ python3 make_test_xbe.py     # 生成 6 个合成 XBE
 
 ### Silent Hill 4: The Room（Title ID `4B4E001F` → KN-031，`by k_away / Evox-T`）
 
-样本 `Silent Hill 4 [plus3] (NTSC).etm`（287 字节，与
-`Silent Hill 4 p3 ntsc.etm` **SHA-256 完全相同**）。入口在 `0x40`（不是常规
+样本 `input/Silent Hill 4 [plus3] (NTSC).etm`（287 字节，与
+`input/Silent Hill 4 p3 ntsc.etm` **SHA-256 完全相同**）。入口在 `0x40`（不是常规
 `0x23`），`0x23–0x3F` 藏着跳板子程序和 handler。版本守卫 TimeDate
 `0x40E173E9` = 2004-06-29。Title ID `4B4E001F`：按 xboxdevwiki 的定义
 （厂商 2 字母 + u16 游戏号，3 位十进制），`KN` = Konami、`0x1F` = 31 →
@@ -287,8 +315,9 @@ handler 用 `movss` **忠实重放**了被覆盖的原指令（真 XBE 已证实
 
 | 文件 | 内容 | 状态 |
 |---|---|---|
-| `Silent Hill 4 [plus3] (NTSC)_verified.jmp` | 全部 3 项（选项 1 走 header-padding cave） | ✅ 端到端验证 + **PS5/XPSemu 实机生效**（2026-10-26） |
-| `Silent Hill 4 [plus3] (NTSC).jmp` | 仅选项 2、3 | ✅ 有效（安全子集） |
+| `output/Silent Hill 4 [plus3] (NTSC)_verified.jmp` | 全部 3 项（选项 1 走 header-padding cave） | ✅ 端到端验证 + **PS5/XPSemu 实机生效**（2026-10-26） |
+| `output/Silent Hill 4 [plus3] (NTSC).jmp` | 仅选项 2、3 | ✅ 有效（安全子集） |
+| `output/Silent Hill 4 p3 ntsc.jmp` | 仅选项 2、3（重复金手指） | ✅ 有效（安全子集） |
 | ~~`_incl_Inflife.jmp`~~ | 选项 1 的位移改写 | ❌ **已证伪为静默空操作，已删除** |
 
 ### ✅ 真 XBE 验证结果（`Silent.Hill.4.[USA].iso` → `default.xbe`）
@@ -319,11 +348,11 @@ handler 用 `movss` **忠实重放**了被覆盖的原指令（真 XBE 已证实
   `lea esi,[ebp+0x2E]` + `call` 安装器写 `68 <handler> C3`——与静态版等价。
 
 handler 实际长度 **18 字节**（`0x2E–0x3F`），`je` 是 `74 08`。
-`make_test_xbe.py` 已把这几种情形做成回归用例（`test_xbe_sh4*.bin`）。
+`make_test_xbe.py` 已把这几种情形做成回归用例（夹具生成到 `tests/`）。
 
 ### ✅ 实机验证（XPSemu / PS5，2026-10-26）
 
-- 部署 `Silent Hill 4 [plus3] (NTSC)_verified.jmp`（全部 3 项）到 PS5 上的
+- 部署 `output/Silent Hill 4 [plus3] (NTSC)_verified.jmp`（全部 3 项）到 PS5 上的
   XPSemu，**Inf Life / Inf Ammo / Saves Never Increase 全部生效**。
 - 这补上了静态回验（`apply_and_check.py`）证明不了的最后一环：**header-padding
   cave（VA `0x109FC`）在真实加载器下确实可执行**——`push 0x109FC; ret` 跳板进
@@ -383,11 +412,11 @@ cp -r skill/etm-to-jmp ~/.agents/skills/
 
 ## 部署到 XPSemu（PS5）
 
-1. 把 `.jmp` 放入 `/data/xemu/patches/`。
+1. 把 `.jmp`（在 `output/` 里）放入 `/data/xemu/patches/`。
 2. 选中游戏 → **△** → Game patches → 勾选需要的作弊项。
 3. 补丁在加载时对内存中的 XBE 原地打入，不修改原盘 XISO。
 
-> **实机验证（2026-10-26）**：`Silent Hill 4 [plus3] (NTSC)_verified.jmp`
+> **实机验证（2026-10-26）**：`output/Silent Hill 4 [plus3] (NTSC)_verified.jmp`
 > 全部 3 项按上述步骤在 PS5 XPSemu 上部署后**全部生效**（含 Inf Life 的
 > header-cave handler）。详见上文「实机验证」一节。
 

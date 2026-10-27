@@ -8,6 +8,8 @@ Layout mimics a plausible retail XBE with deliberate VA-Raw drift:
   .rdata VA 0x001A1000 size 0x0C0000  raw 0x00191800  (delta 0x10800, +0x800 drift)
          raw size 0xBF000 -> last 0x1000 bytes are BSS (no file backing)
   .data  VA 0x00261000 size 0x0D0000  raw 0x00252000  (delta 0x0F000, -0x1000 drift)
+
+Fixtures are written into tests/ by default (pass a directory as argv[1]).
 """
 import struct, sys
 
@@ -106,14 +108,18 @@ def build_bgda2_bss(path):
     print(f"wrote {path} (.text virtual 0x190000 but raw only 0x10000 -> .bss)")
 
 if __name__ == "__main__":
-    build(sys.argv[1] if len(sys.argv) > 1 else "test_xbe_header.bin")
-    build("test_xbe_wrongver.bin", timedate=0x11111111)
-    build_bgda2_bss("test_xbe_bss.bin")
-    build_sh4_like("test_xbe_sh4.bin", site_bytes=bytes.fromhex("f30f118611223344"))
-    build_sh4_like("test_xbe_sh4_nofit.bin", site_bytes=bytes.fromhex("9090909090909090"))
+    import os
+    outdir = sys.argv[1] if len(sys.argv) > 1 else "tests"
+    os.makedirs(outdir, exist_ok=True)
+    p = lambda n: os.path.join(outdir, n)
+    build(p("test_xbe_header.bin"))
+    build(p("test_xbe_wrongver.bin"), timedate=0x11111111)
+    build_bgda2_bss(p("test_xbe_bss.bin"))
+    build_sh4_like(p("test_xbe_sh4.bin"), site_bytes=bytes.fromhex("f30f118611223344"))
+    build_sh4_like(p("test_xbe_sh4_nofit.bin"), site_bytes=bytes.fromhex("9090909090909090"))
     # falsification case: site ALREADY stores to [esi+0xCB4FE8], i.e. the same
     # displacement the handler uses -> redirect would be a silent no-op
-    build_sh4_like("test_xbe_sh4_same.bin", site_bytes=bytes.fromhex("f30f1186e84fcb00"))
-    build_sh4_nocave("test_xbe_sh4_nocave.bin")
+    build_sh4_like(p("test_xbe_sh4_same.bin"), site_bytes=bytes.fromhex("f30f1186e84fcb00"))
+    build_sh4_nocave(p("test_xbe_sh4_nocave.bin"))
 
 

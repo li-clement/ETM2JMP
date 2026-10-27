@@ -52,6 +52,15 @@ mirrors (e.g. the handler re-executes the same `movss [esi+disp], xmm0` with
 a redirected displacement), the equivalent is a small in-place field rewrite.
 Use --hook-approx (with --xbe for verification) to emit those records; by
 default hook options are reported and left out.
+
+Usage (batch-capable; converted .jmp files land in ./output by default):
+
+  python3 etm2jmp.py input/trainer.etm --xbe input/default.xbe
+  python3 etm2jmp.py input/*.etm --outdir output --report
+  python3 etm2jmp.py trainer.etm --jmp custom.jmp --report custom.md
+
+Repo layout: input/ (.etm trainers + optional default.xbe) -> output/ (.jmp)
+and reports/ (per-file analysis). See README.md for the full workflow.
 """
 
 import argparse
@@ -656,35 +665,70 @@ def build_jmp(etm, runs_by_option, game_title=None, extra_notes=""):
     return "\n".join(lines)
 
 
-# -------------------------------------------------------------------- main
+# -------------------------------------------------------------------- report
 
-def main():
-    ap = argparse.ArgumentParser(description="Convert .ETM trainers to .JMP patches")
-    ap.add_argument("etm", help="input .etm file")
-    ap.add_argument("--jmp", help="output .jmp path (default: <name>.jmp)")
-    ap.add_argument("--report", help="also write a markdown analysis report")
-    ap.add_argument("--disasm", action="store_true", help="print disassembly")
-    ap.add_argument("--xbe", help="target default.xbe for EXACT VA->offset "
-                                  "mapping + TimeDate guard verification")
-    ap.add_argument("--raw-va", action="store_true",
-                    help="NO conversion: emit ETM immediates verbatim (debug only)")
-    ap.add_argument("--hook-approx", action="store_true",
-                    help="emit a PROVEN static equivalent for runtime hooks "
-                         "(strongly recommended together with --xbe)")
-    ap.add_argument("--hook-cave", action="store_true",
-                    help="general fallback for runtime hooks: copy the handler "
-                         "into verified XBE zero-padding and point the "
-                         "trampoline there (requires --xbe)")
-    ap.add_argument("--game-title", help="override game-title header field")
-    args = ap.parse_args()
+def write_report(report_path, etm, ex, runs_by_option, va_report,
+                 hook_opts, mode, approx_notes):
+    """Markdown analysis report for one converted ETM."""
+    with open(report_path, "w") as f:
+        f.write(f"# ETM analysis: {etm.name}\n\n")
+        f.write(f"- Trainer: **{etm.trainer_title}**\n")
+        f.write(f"- Author line: `{etm.description}`\n")
+        f.write(f"- Title ID: `{' '.join(f'{t:08X}' for t in etm.title_ids)}`"
+                f"{' (' + TITLE_ID_NAMES[etm.title_ids[0]] + ')' if etm.title_ids and etm.title_ids[0] in TITLE_ID_NAMES else ''}\n")
+        f.write(f"- Version guard: `[{ex.guard[0]:08X}] == {ex.guard[1]:08X}` "
+                f"(XBE header TimeDate at base+0x114)\n" if ex.guard else "")
+        f.write(f"- Options: {len(etm.options)}\n")
+        f.write(f"- Address mode: {mode}\n")
+        f.write("- Header/string model cross-checked against jayxbox's own "
+                "[ETM Analyzer](https://www.jayxbox.com/Misc/etm-trainer.php)\n\n")
+        if ex.byte_guards:
+            f.write("### Original-byte signature guards\n\n")
+            f.write("The trainer refuses to patch unless the byte already at the site matches:\n\n")
+            f.write("| site VA | expected original byte |\n|---|---|\n")
+            for va, exp in ex.byte_guards:
+                f.write(f"| `0x{va:08X}` | `0x{exp:02X}` |\n")
+            f.write("\n")
+        f.write("\n| # | Option | ETM VA -> .JMP file offset : bytes |\n")
+        f.write("|---|--------|------------------------------------|\n")
+        for opt_idx in runs_by_option:
+            name = etm.option_names[opt_idx] if opt_idx < len(etm.option_names) else "?"
+            recs = "<br>".join(
+                f"`{va:X}`→`{off:X}` `{d.hex().upper()}`"
+                for (va, _), (off, d, _) in zip(va_report[opt_idx], runs_by_option[opt_idx]))
+            if opt_idx in hook_opts and not recs:
+                recs = "*runtime hook — not statically convertible*"
+            f.write(f"| {opt_idx + 1} | {name} | {recs} |\n")
+        if ex.hooks:
+            f.write("\n## Runtime hooks\n\n")
+            for h in ex.hooks:
+                f.write(f"- Option **{h['option'] + 1}** "
+                        f"({etm.option_names[h['option']] if h['option'] is not None and h['option'] < len(etm.option_names) else '?'}): "
+                        f"site VA `0x{h['site']:08X}`, handler at ETM+`0x{h['handler']:X}`, "
+                        f"back `0x{h['back']:X}` ({h['length']} bytes overwritten)\n")
+                f.write("\n```asm\n")
+                f.write("\n".join(h["text"]))
+                f.write("\n```\n\n")
+                f.write("The trampoline's 4 immediate bytes are "
+                        "`(ETM load address + offset)`, which only exist while the "
+                        "trainer engine has the ETM mapped in the game process, so "
+                        "they cannot be copied into a static `.JMP` record.\n")
+        for n in approx_notes:
+            f.write(f"\n> {n}\n")
+    print(f"  wrote {report_path}")
 
-    raw = open(args.etm, "rb").read()
-    etm = ETM(raw, os.path.basename(args.etm))
+
+# ------------------------------------------------------------------ convert
+
+def convert_one(args, etm_path):
+    """Full pipeline for ONE .etm: parse -> map -> hook handling -> write .jmp (+ report)."""
+    raw = open(etm_path, "rb").read()
+    etm = ETM(raw, os.path.basename(etm_path))
     ex = Extractor(etm)
     ex.run()
     ex.analyze_hooks()
 
-    print(f"== {os.path.basename(args.etm)} ==")
+    print(f"\n== {os.path.basename(etm_path)} ==")
     print(f"  trainer   : {etm.trainer_title}")
     print(f"  author    : {etm.description!r}")
     print(f"  title IDs : {', '.join(f'{t:08X}' for t in etm.title_ids)}")
@@ -792,9 +836,6 @@ def main():
 
     # general fallback: move the (fully relocatable) handler into XBE padding
     if args.hook_cave:
-        if mapper is None:
-            ap.error("--hook-cave needs --xbe: the cave address must be a real, "
-                     "verified file-backed location in the target XBE")
         truncated = [n for n, _va, _vsz, raw, rawsz, _f in mapper.sections
                      if raw + rawsz > len(mapper.data)]
         if truncated:
@@ -858,7 +899,12 @@ def main():
         for off, txt in ex.log:
             print(f"  {off:04X}: {txt}")
 
-    jmp_path = args.jmp or (os.path.splitext(args.etm)[0] + ".jmp")
+    if args.jmp:
+        jmp_path = args.jmp
+    else:
+        stem = os.path.splitext(os.path.basename(etm_path))[0]
+        jmp_path = os.path.join(args.outdir, stem + ".jmp")
+    os.makedirs(os.path.dirname(jmp_path) or ".", exist_ok=True)
     extra = ""
     if args.xbe:
         extra = " Offsets mapped exactly via XBE section table; TimeDate guard verified."
@@ -867,55 +913,57 @@ def main():
     if hook_opts and not (args.hook_approx or args.hook_cave):
         extra += " Runtime-hook options are NOT included (they need the ETM resident in game memory)."
     open(jmp_path, "w").write(build_jmp(etm, runs_by_option, args.game_title, extra))
-    print(f"\nwrote {jmp_path}")
+    print(f"  wrote {jmp_path}")
 
-    if args.report:
-        with open(args.report, "w") as f:
-            f.write(f"# ETM analysis: {os.path.basename(args.etm)}\n\n")
-            f.write(f"- Trainer: **{etm.trainer_title}**\n")
-            f.write(f"- Author line: `{etm.description}`\n")
-            f.write(f"- Title ID: `{' '.join(f'{t:08X}' for t in etm.title_ids)}`"
-                    f"{' (' + TITLE_ID_NAMES[etm.title_ids[0]] + ')' if etm.title_ids and etm.title_ids[0] in TITLE_ID_NAMES else ''}\n")
-            f.write(f"- Version guard: `[{ex.guard[0]:08X}] == {ex.guard[1]:08X}` "
-                    f"(XBE header TimeDate at base+0x114)\n" if ex.guard else "")
-            f.write(f"- Options: {len(etm.options)}\n")
-            f.write(f"- Address mode: {mode}\n")
-            f.write("- Header/string model cross-checked against jayxbox's own "
-                    "[ETM Analyzer](https://www.jayxbox.com/Misc/etm-trainer.php)\n\n")
-            if ex.byte_guards:
-                f.write("### Original-byte signature guards\n\n")
-                f.write("The trainer refuses to patch unless the byte already at the site matches:\n\n")
-                f.write("| site VA | expected original byte |\n|---|---|\n")
-                for va, exp in ex.byte_guards:
-                    f.write(f"| `0x{va:08X}` | `0x{exp:02X}` |\n")
-                f.write("\n")
-            f.write("\n| # | Option | ETM VA -> .JMP file offset : bytes |\n")
-            f.write("|---|--------|------------------------------------|\n")
-            for opt_idx in runs_by_option:
-                name = etm.option_names[opt_idx] if opt_idx < len(etm.option_names) else "?"
-                recs = "<br>".join(
-                    f"`{va:X}`→`{off:X}` `{d.hex().upper()}`"
-                    for (va, _), (off, d, _) in zip(va_report[opt_idx], runs_by_option[opt_idx]))
-                if opt_idx in hook_opts and not recs:
-                    recs = "*runtime hook — not statically convertible*"
-                f.write(f"| {opt_idx + 1} | {name} | {recs} |\n")
-            if ex.hooks:
-                f.write("\n## Runtime hooks\n\n")
-                for h in ex.hooks:
-                    f.write(f"- Option **{h['option'] + 1}** "
-                            f"({etm.option_names[h['option']] if h['option'] is not None and h['option'] < len(etm.option_names) else '?'}): "
-                            f"site VA `0x{h['site']:08X}`, handler at ETM+`0x{h['handler']:X}`, "
-                            f"back `0x{h['back']:X}` ({h['length']} bytes overwritten)\n")
-                    f.write("\n```asm\n")
-                    f.write("\n".join(h["text"]))
-                    f.write("\n```\n\n")
-                    f.write("The trampoline's 4 immediate bytes are "
-                            "`(ETM load address + offset)`, which only exist while the "
-                            "trainer engine has the ETM mapped in the game process, so "
-                            "they cannot be copied into a static `.JMP` record.\n")
-            for n in approx_notes:
-                f.write(f"\n> {n}\n")
-        print(f"wrote {args.report}")
+    if args.report is not None:
+        stem = os.path.splitext(os.path.basename(etm_path))[0]
+        rp = args.report or os.path.join("reports", stem + ".md")
+        os.makedirs(os.path.dirname(rp) or ".", exist_ok=True)
+        write_report(rp, etm, ex, runs_by_option, va_report,
+                     hook_opts, mode, approx_notes)
+
+
+# --------------------------------------------------------------------- main
+
+def main():
+    ap = argparse.ArgumentParser(
+        description="Convert .ETM trainers to .JMP patches "
+                    "(one or many files; converted .jmp land in --outdir)")
+    ap.add_argument("etms", nargs="+", help="input .etm file(s) — batch supported")
+    ap.add_argument("--jmp", help="output .jmp path (single input only; "
+                                  "default: <outdir>/<name>.jmp)")
+    ap.add_argument("--outdir", default="output",
+                    help="directory for converted .jmp files (default: ./output; "
+                         "ignored when --jmp is given)")
+    ap.add_argument("--report", nargs="?", const="", default=None,
+                    help="also write markdown analysis report(s): bare flag -> "
+                         "reports/<name>.md; explicit path only with a single input")
+    ap.add_argument("--disasm", action="store_true", help="print disassembly")
+    ap.add_argument("--xbe", help="target default.xbe for EXACT VA->offset "
+                                  "mapping + TimeDate guard verification")
+    ap.add_argument("--raw-va", action="store_true",
+                    help="NO conversion: emit ETM immediates verbatim (debug only)")
+    ap.add_argument("--hook-approx", action="store_true",
+                    help="emit a PROVEN static equivalent for runtime hooks "
+                         "(strongly recommended together with --xbe)")
+    ap.add_argument("--hook-cave", action="store_true",
+                    help="general fallback for runtime hooks: copy the handler "
+                         "into verified XBE zero-padding and point the "
+                         "trampoline there (requires --xbe)")
+    ap.add_argument("--game-title", help="override game-title header field")
+    args = ap.parse_args()
+
+    if args.jmp and len(args.etms) > 1:
+        ap.error("--jmp takes one path; use --outdir for batch conversion")
+    if args.report and len(args.etms) > 1 and args.report != "":
+        ap.error("--report PATH takes one path; use bare --report in batch mode "
+                 "(writes reports/<name>.md per file)")
+    if args.hook_cave and not args.xbe:
+        ap.error("--hook-cave needs --xbe: the cave address must be a real, "
+                 "verified file-backed location in the target XBE")
+
+    for etm_path in args.etms:
+        convert_one(args, etm_path)
 
 
 if __name__ == "__main__":

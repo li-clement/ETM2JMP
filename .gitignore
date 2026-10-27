@@ -1,6 +1,7 @@
 __pycache__/
 *.pyc
-test_xbe_*.bin
+tests/*.bin
 /tmp/
 *.iso
 *.xbe
+.DS_Store
